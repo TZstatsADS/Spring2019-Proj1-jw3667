@@ -23,7 +23,7 @@ From the packages' descriptions:
 + `Shiny` is an R package that makes it easy to build interactive web apps straight from R;
 
 ```{r load libraries, warning=FALSE, message=FALSE}
-
+library(tm)
 library(tidyverse)
 library(tidytext)
 library(DT)
@@ -40,7 +40,6 @@ We use the processed data for our analysis and combine it with the demographic i
 
 ```{r load data, warning=FALSE, message=FALSE}
 hm_data <- read_csv("../output/processed_moments.csv")
-
 urlfile<-'https://raw.githubusercontent.com/rit-public/HappyDB/master/happydb/data/demographic.csv'
 demo_data <- read_csv(urlfile)
 ```
@@ -50,6 +49,8 @@ demo_data <- read_csv(urlfile)
 We select a subset of the data that satisfies specific row conditions.
 
 ```{r combining data, warning=FALSE, message=FALSE}
+# change text to cleaned_hm !?!?!?
+# remove (months_3 = "3m",) in line 71, due to less data
 hm_data <- hm_data %>%
   inner_join(demo_data, by = "wid") %>%
   select(wid,
@@ -62,7 +63,7 @@ hm_data <- hm_data %>%
          country, 
          ground_truth_category, 
          text) %>%
-  mutate(count = sapply(hm_data$text, wordcount)) %>%
+  mutate(count = sapply(hm_data$cleaned_hm, wordcount)) %>%
   filter(gender %in% c("m", "f")) %>%
   filter(marital %in% c("single", "married")) %>%
   filter(parenthood %in% c("n", "y")) %>%
@@ -84,13 +85,16 @@ word_count <- bag_of_words %>%
   count(word, sort = TRUE)
 ```
 
+```{r bag of words, warning=FALSE, message=FALSE}
+bag_of_words2 <-  hm_data[which(hm_data$gender == "m"),] %>%
+  unnest_tokens(word, text)
+```
 ### Create bigrams using the text data
 
 ```{r bigram, warning=FALSE, message=FALSE}
 hm_bigrams <- hm_data %>%
   filter(count != 1) %>%
   unnest_tokens(bigram, text, token = "ngrams", n = 2)
-
 bigram_counts <- hm_bigrams %>%
   separate(bigram, c("word1", "word2"), sep = " ") %>%
   count(word1, word2, sort = TRUE)
@@ -196,8 +200,63 @@ ui <- navbarPage("What makes people happy?",
                  
                  tabPanel("Data",
                           DT::dataTableOutput("table")
+                          ),
+                 
+                 tabPanel("Mixture Analysis", 
+                          titlePanel(h1("Most Frequent Occurrences",
+                                        align = "center")),
+                          
+                          sidebarLayout(
+                            sidebarPanel(
+                              sliderInput(inputId = "Wordcloud",
+                                          label = "Number of terms for word cloud:",
+                                          min = 5,
+                                          max = 100,
+                                          value = 50),
+                              br(),
+                              br(),
+                              
+                              selectInput(inputId = "Gender",
+                                          label = "Select the gender:",
+                                          choices = c("",
+                                                      "Male" = "m",
+                                                      "Female" = "f")),
+                              br(),
+                              br(),
+                              
+                              selectInput(inputId = "MS",
+                                          label = "Select the Marital Status:",
+                                          choices = c("",
+                                                      "Single" = "single",
+                                                      "Married" = "married")),
+                              br(),
+                              br(),
+                              
+                              selectInput(inputId = "Parenthood",
+                                          label = "Select the Parenthood:",
+                                          choices = c("",
+                                                      "No" = "n",
+                                                      "Yes" = "y")),
+                              br(),
+                              br(),
+                              
+                              selectInput(inputId = "age",
+                                          label = "Select the age stage:",
+                                          choices = c("",
+                                                      "less than 18" = 18,
+                                                      "less than 25" = 25,
+                                                      "less than 35" = 35,
+                                                      "less than 50" = 50))
+                            ),
+                            
+                            mainPanel(
+                              wordcloud2Output(outputId = "MWC")
+                            )
+                          )
+                          
                           )
 )
+
 ```
 
 ### Develop the server for the R Shiny app
@@ -245,6 +304,41 @@ server <- function(input, output, session) {
                  rotateRatio = 0)
     
   })
+  
+  output$MWC <- renderWordcloud2({
+    temp <- bag_of_words
+    if(input$Gender == "Male"){
+      temp <- temp[which(gender = "m"),]
+    }else if(input$Gender == "Female"){
+      temp <- temp[which(gender = "f"),]
+    }
+    if(input$MS == "Single"){
+      temp <- temp[which(marital = "single"),]
+    }else if(input$MS == "Married"){
+      temp <- temp[which(marital = "married"),]
+    }
+    if(input$Parenthood == "No"){
+      temp <- temp[which(parenthood = "n"),]
+    }else if(input$Parenthood == "Yes"){
+      temp <- temp[which(parenthood = "y"),]
+    }
+    if(input$age == 18){
+      temp <- temp[which(strtoi(temp$age) <= 18),]
+    }else if(input$age == 25){
+      temp <- temp[which(strtoi(temp$age) > 18 && strtoi(temp$age) <= 25),]
+    }else if(input$age == 35){
+      temp <- temp[which(strtoi(temp$age) > 25 && strtoi(temp$age) <= 35),]
+    }else if(input$age == 50){
+      temp <- temp[which(strtoi(temp$age) > 35 && strtoi(temp$age) <= 50),]
+    }
+    
+    temp_WC <- temp %>%
+      count(word, sort = TRUE)
+    word_count %>%
+      slice(1:input$Wordcloud) %>%
+      wordcloud2(size = 0.6, rotateRatio = 0)
+  })
+  
   
   output$figure <- renderPlot(height = 500, width = 500, {
     
